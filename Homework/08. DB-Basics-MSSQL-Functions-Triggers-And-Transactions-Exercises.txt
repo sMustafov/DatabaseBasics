@@ -1,0 +1,670 @@
+/* 8.Exercises: Functions, Triggers and Transactions */
+
+/* Problem 1. Employees with Salary Above 35000 */
+
+CREATE PROC usp_GetEmployeesSalaryAbove35000
+AS
+SELECT FirstName, LastName
+FROM Employees
+WHERE Salary > 35000
+
+EXEC usp_GetEmployeesSalaryAbove35000
+
+/* Problem 2. Employees with Salary Above Number */
+
+CREATE PROC usp_GetEmployeesSalaryAboveNumber (@minSalary money)
+AS
+  SELECT FirstName, LastName
+  FROM Employees
+  WHERE Salary >= @minSalary
+
+EXEC usp_GetEmployeesSalaryAboveNumber[48100]
+
+/* Problem 3. Town Names Starting With */
+
+CREATE PROC usp_GetTownsStartingWith (@startingWith varchar(max))
+AS
+  SELECT Name AS Town
+  FROM Towns
+  WHERE Name LIKE CONCAT(@startingWith, '%')
+
+EXEC usp_GetTownsStartingWith[b]
+
+/* Problem 4. Employees from Town */
+
+CREATE PROC usp_GetEmployeesFromTown (@townName NVARCHAR(64))
+AS
+SELECT FirstName, LastName
+FROM Employees AS e
+JOIN Addresses AS a
+ON e.AddressID = a.AddressID
+JOIN Towns AS t
+ON t.TownID = a.TownID
+WHERE LOWER(t.Name) = LOWER(@townName)
+
+EXEC usp_GetEmployeesFromTown[Sofia]
+
+/* Problem 5. Salary Level Function */
+
+CREATE FUNCTION ufn_GetSalaryLevel(@salary money)
+RETURNS varchar(10)
+AS  
+BEGIN
+  DECLARE @salaryLevel varchar(10) = 'High';
+  IF(@salary < 30000)       SET @salaryLevel = 'Low';
+  ELSE IF(@salary <= 50000) SET @salaryLevel = 'Average';
+  RETURN @salaryLevel;
+END
+
+SELECT Salary,
+dbo.ufn_GetSalaryLevel(Salary)
+AS SalaryLevel
+FROM Employees
+
+/* Problem 6. Employees by Salary Level */
+
+CREATE PROCEDURE usp_EmployeesBySalaryLevel(@levelOfSalary VARCHAR(10))
+AS
+BEGIN
+	SELECT e.FirstName, e.LastName
+    FROM Employees AS e
+	WHERE [dbo].[ufn_GetSalaryLevel] (e.Salary) = @levelOfSalary
+END
+
+/* Problem 7. Define Function */
+
+CREATE FUNCTION ufn_IsWordComprised(@setOfLetters NVARCHAR(MAX), @word NVARCHAR(MAX))
+RETURNS BIT
+AS
+BEGIN
+	DECLARE @currentIndex INT = 1;
+	WHILE @currentIndex < LEN(@word)
+		DECLARE @currentLetter NVARCHAR(MAX) = SUBSTRING(@word, @currentIndex, 1);
+		DECLARE @letterPosition INT = CHARINDEX(@currentLetter, @setOfLetters); 
+		IF(@letterPosition = 0)
+		BEGIN
+			RETURN 0
+		END
+		SET @currentIndex += 1;
+	END
+	RETURN 1
+END
+
+/* Problem 8. Delete Employees and Departments */
+
+DELETE FROM EmployeesProjects
+WHERE EmployeeID IN (
+  SELECT e.EmployeeID FROM Employees AS e 
+  JOIN Departments AS d ON e.DepartmentID = d.DepartmentID
+  WHERE d.Name IN ('Production', 'Production Control')
+)
+
+ALTER TABLE Departments
+ALTER COLUMN ManagerID int NULL
+
+UPDATE Departments
+SET ManagerID = NULL
+WHERE Name IN ('Production', 'Production Control')
+
+UPDATE Employees
+SET ManagerID = NULL
+WHERE DepartmentID IN (
+  SELECT DepartmentID FROM Departments
+  WHERE Name IN ('Production', 'Production Control')
+)
+
+ALTER TABLE Employees
+DROP CONSTRAINT FK_Employees_Employees
+
+DELETE FROM Employees
+WHERE DepartmentID IN (
+  SELECT DepartmentID FROM Departments
+  WHERE Name IN ('Production', 'Production Control')
+)
+
+DELETE FROM Departments
+WHERE Name IN ('Production', 'Production Control')
+
+ALTER TABLE Departments
+ALTER COLUMN ManagerID int NOT NULL
+-- why can't self-referencing be restored as well ???
+ALTER TABLE Employees
+ADD CONSTRAINT FK_Employees_Employees FOREIGN KEY(ManagerID)
+REFERENCES Employees(EmployeeID)
+
+/* Problem 9. Employees with Three Projects */
+
+CREATE PROCEDURE usp_AssignProject (@employeeID int, @projectID int)
+AS
+BEGIN
+  DECLARE @maxEmployeeProjectsCount int = 3;
+  DECLARE @employeeProjectsCount int;
+
+  BEGIN TRAN
+  INSERT INTO EmployeesProjects (EmployeeID, ProjectID) 
+  VALUES (@employeeID, @projectID)
+
+  SET @employeeProjectsCount = (
+    SELECT COUNT(*)
+    FROM EmployeesProjects
+    WHERE EmployeeID = @employeeID
+  )
+  IF(@employeeProjectsCount > @maxEmployeeProjectsCount)
+    BEGIN
+      RAISERROR('The employee has too many projects!', 16, 1);
+      ROLLBACK;
+    END
+  ELSE COMMIT
+END
+
+/* Problem 10. Find Full Name */
+
+CREATE PROCEDURE usp_GetHoldersFullName 
+AS
+BEGIN
+	SELECT ah.FirstName + ' ' + ah.LastName AS FullName
+	 FROM AccountHolders AS ah
+END
+
+/* Problem 11. People with Balance Higher Than */
+
+CREATE PROCEDURE usp_GetHoldersWithBalanceHigherThan(@number MONEY)
+AS
+BEGIN
+	SELECT i.Firstname,i.Lastname FROM(SELECT a.FirstName, a.LastName, SUM(ac.Balance) AS Total
+	FROM AccountHolders AS a
+	INNER JOIN Accounts AS ac
+	ON a.Id = ac.AccountHolderId
+	GROUP BY a.FirstName,a.LastName) AS i
+	WHERE i.Total > @number
+END
+
+/* Problem 12. Future Value Function */
+
+CREATE FUNCTION  ufn_CalculateFutureValue (@sum MONEY, @yearlyInterestRate FLOAT, @years INT)
+RETURNS MONEY
+AS
+BEGIN
+	DECLARE @futureValue MONEY;
+	SET @futureValue = @sum * POWER(1 + @yearlyInterestRate, @years);
+	RETURN @futureValue
+END
+
+/* Problem 13. Calculating Interest */
+
+CREATE PROC usp_CalculateFutureValueForAccount (@accountId int, @interestRate float)
+AS
+BEGIN
+  DECLARE @years int = 5;
+  SELECT
+    a.Id AS [Account Id],
+    ah.FirstName AS [First Name],
+    ah.LastName AS [Last Name], 
+    a.Balance AS [Current Balance],
+    dbo.ufn_CalculateFutureValue(a.Balance, @interestRate, @years) AS [Balance in 5 years]
+  FROM AccountHolders AS ah
+  JOIN Accounts AS a ON ah.Id = a.AccountHolderId
+  WHERE a.Id = @accountId
+END
+
+/* Problem 14. Deposit Money */
+
+CREATE PROCEDURE usp_DepositMoney (@accountId INT, @moneyAmount MONEY)
+AS
+BEGIN
+    BEGIN TRAN
+		UPDATE Accounts
+		SET Balance += @moneyAmount
+		WHERE Id = @accountId;
+    COMMIT
+END
+
+/* Problem 15. Withdraw Money */
+
+CREATE PROCEDURE usp_WithdrawMoney (@accountId INT, @moneyAmount MONEY)
+AS
+BEGIN
+    BEGIN TRAN
+		UPDATE Accounts
+		SET Balance -= @moneyAmount
+		WHERE Id = @accountId;
+    COMMIT
+END
+
+/* Problem 16. Money Transfer */
+
+CREATE PROCEDURE usp_TransferMoney (@senderId int, @receiverId int, @transferAmount money)
+AS
+BEGIN 
+  DECLARE @senderBalanceBefore money = (SELECT Balance FROM Accounts WHERE Id = @senderId);
+  IF(@senderBalanceBefore IS NULL)
+  BEGIN
+    RAISERROR('Invalid sender account!', 16, 1);
+    RETURN;
+  END   
+  DECLARE @receiverBalanceBefore money = (SELECT Balance FROM Accounts WHERE Id = @receiverId);  
+  IF(@receiverBalanceBefore IS NULL)
+  BEGIN
+    RAISERROR('Invalid receiver account!', 16, 1);
+    RETURN;
+  END   
+  IF(@senderId = @receiverId)
+  BEGIN
+    RAISERROR('Sender and receiver accounts must be different!', 16, 1);
+    RETURN;
+  END  
+  IF(@transferAmount <= 0)
+  BEGIN
+    RAISERROR ('Transfer amount must be positive!', 16, 1); 
+    RETURN;
+  END 
+  
+  BEGIN TRANSACTION
+  EXEC usp_WithdrawMoney @senderId, @transferAmount;
+  EXEC usp_DepositMoney @receiverId, @transferAmount;
+  
+  DECLARE @senderBalanceAfter money = (SELECT Balance FROM Accounts WHERE Id = @senderId);
+  DECLARE @receiverBalanceAfter money = (SELECT Balance FROM Accounts WHERE Id = @receiverId);  
+  IF((@senderBalanceAfter <> @senderBalanceBefore - @transferAmount) OR 
+     (@receiverBalanceAfter <> @receiverBalanceBefore + @transferAmount))
+    BEGIN
+      ROLLBACK;
+      RAISERROR('Invalid account balances!', 16, 1);
+      RETURN;
+    END
+  COMMIT;
+END
+
+/* Problem 17. Create Table Logs */
+
+CREATE TRIGGER tr_AccountBalanceChange ON Accounts FOR UPDATE
+AS
+BEGIN
+  DECLARE @accountId int = (SELECT Id FROM inserted);
+  DECLARE @oldBalance money = (SELECT Balance FROM deleted);
+  DECLARE @newBalance money = (SELECT Balance FROM inserted);
+  IF(@newBalance <> @oldBalance)
+    INSERT INTO Logs VALUES (@accountId, @oldBalance, @newBalance);
+END
+
+/* Problem 18. Create Table Emails */
+
+CREATE TRIGGER tr_LogsNotificationEmails ON Logs FOR INSERT
+AS
+BEGIN
+  DECLARE @recipient int = (SELECT AccountId FROM inserted);
+  DECLARE @oldBalance money = (SELECT OldSum FROM inserted);
+  DECLARE @newBalance money = (SELECT NewSum FROM inserted);
+  DECLARE @subject varchar(200) = CONCAT('Balance change for account: ', @recipient);
+  DECLARE @body varchar(200) = 
+    CONCAT('On ', GETDATE(), ' your balance was changed from ', @oldBalance, ' to ', @newBalance, '.');  
+  INSERT INTO NotificationEmails (Recipient, Subject, Body) 
+  VALUES (@recipient, @subject, @body)
+END
+
+/* Problem 19. *Scalar Function: Cash in User Games Odd Rows */
+
+CREATE FUNCTION ufn_CashInUsersGames (@gameName NVARCHAR(50))
+RETURNS @SumCashTable TABLE
+(
+	[SumCash] MONEY
+)
+AS
+BEGIN
+	DECLARE @table TABLE (SumCash MONEY)
+	INSERT INTO @table
+	SELECT SUM(ug.Cash) AS SumCash FROM
+	(SELECT  ROW_NUMBER () OVER (ORDER BY ug.Cash DESC) AS Row, ug.GameId, ug.Cash
+	FROM UsersGames AS ug
+		INNER JOIN Games AS g
+		ON ug.GameId = g.Id
+		WHERE g.Name = @gameName) AS ug
+		WHERE ug.Row % 2 = 1 
+
+		INSERT INTO @SumCashTable
+		SELECT * FROM @table
+		RETURN
+END
+
+/* Problem 20.	Trigger */
+
+CREATE TRIGGER tr_BuyItems
+ON [dbo].[UserGameItems]
+INSTEAD OF INSERT
+AS
+BEGIN
+	DECLARE @itemLevel INT;
+	DECLARE @userGameLevel INT;
+	DECLARE @itemID INT;
+	DECLARE @userGameID INT= 0;
+	DECLARE insertCursor CURSOR
+		FOR
+		SELECT i.ItemId, i.UserGameId 
+		FROM inserted AS i
+
+		OPEN insertCursor
+		FETCH NEXT FROM insertCursor
+        INTO @itemID, @userGameID
+
+        WHILE @@FETCH_STATUS = 0
+		BEGIN
+		SET @itemLevel = (SELECT MinLevel FROM Items WHERE Id = @itemID)
+		SET @userGameLevel = (SELECT Level FROM UsersGames WHERE Id = @userGameID)
+
+	   IF(@itemLevel > @userGameLevel)
+	   BEGIN
+	   RAISERROR('Invalid item ID', 16, 1)
+       END
+       ELSE
+       BEGIN
+	   INSERT INTO UserGameItems (ItemId, UserGameId)
+	   VALUES (@itemID, @userGameID)
+END
+	   
+
+       FETCH NEXT FROM insertCursor
+       INTO @itemID, @userGameID
+	   END
+CLOSE insertCursor
+DEALLOCATE  InsertCursor
+
+/* Problem 21. *Massive Shopping */
+
+SET XACT_ABORT ON
+
+BEGIN TRAN [BuyItems1]
+BEGIN TRY
+	DECLARE @gameId INT, @userId INT, @userGameId INT
+	 
+	SELECT
+		@userId = Users.Id,
+		@gameId = Games.Id,
+		@userGameId = UsersGames.Id
+	FROM Users
+	JOIN UsersGames ON
+	UsersGames.UserId = Users.Id
+	JOIN Games ON
+	Games.Id = UsersGames.GameId
+	WHERE Users.FirstName = 'Stamat'
+	AND Games.Name = 'Safflower';
+
+	DECLARE @itemsTotalCash INT = (SELECT SUM(Price) FROM Items WHERE MinLevel BETWEEN 11 AND 12)
+	
+	UPDATE UsersGames
+	SET Cash -= @itemsTotalCash
+	WHERE UsersGames.Id = @userGameId
+
+	INSERT INTO UserGameItems (UserGameId, ItemId)
+	SELECT 110, Id FROM Items WHERE MinLevel BETWEEN 11 AND 12
+COMMIT TRAN [BuyItems1]
+END TRY
+BEGIN CATCH
+  ROLLBACK TRANSACTION [BuyItems1]
+END CATCH
+
+BEGIN TRAN [BuyItems2]
+BEGIN TRY
+	DECLARE @itemsTotalCash2 INT = (SELECT SUM(Price) FROM Items WHERE MinLevel BETWEEN 19 AND 21)
+	
+	UPDATE UsersGames
+	SET Cash -= @itemsTotalCash2
+	WHERE UsersGames.Id = @userGameId
+
+	INSERT INTO UserGameItems (UserGameId, ItemId)
+	SELECT 110, Id FROM Items WHERE MinLevel BETWEEN 19 AND 21
+COMMIT TRAN [BuyItems2]
+END TRY
+BEGIN CATCH
+  ROLLBACK TRANSACTION [BuyItems2]
+END CATCH
+
+/* Problem 22. Number of Users for Email Provider */
+
+SELECT u.EmailProvider, COUNT(*) AS [NumberOfUsers] FROM
+(SELECT u.Id, SUBSTRING(u.Email, CHARINDEX('@', u.Email) + 1, LEN(u.Email)) AS [EmailProvider]
+FROM Users AS u) AS u
+GROUP BY u.EmailProvider
+ORDER BY NumberOfUsers DESC, u.EmailProvider
+
+/* Problem 23. All User in Games */
+
+SELECT g.Name, gt.Name, u.Username, ug.Level, ug.Cash, c.Name
+ FROM UsersGames AS ug
+	INNER JOIN Users AS u
+	ON ug.UserId = u.Id
+	INNER JOIN Games AS g
+	ON ug.GameId = g.Id
+	INNER JOIN GameTypes AS gt
+	ON gt.Id = g.GameTypeId
+	INNER JOIN Characters AS c
+	ON ug.CharacterId = c.Id
+	ORDER BY ug.Level DESC, u.Username, g.Name
+
+/* Problem 24. Users in Games with Their Items */
+
+SELECT u.Username, g.Name, COUNT(ugi.ItemId) AS [ItemsCount], SUM(i.Price) AS [ItemsPrice] FROM UserGameItems AS ugi
+	INNER JOIN UsersGames AS ug
+	ON ugi.UserGameId = ug.Id
+	INNER JOIN Users AS u
+	ON ug.UserId = u.Id
+	INNER JOIN Games AS g
+	ON ug.GameId = g.Id
+	INNER JOIN Items AS i
+	ON ugi.ItemId = i.Id
+	GROUP BY u.Username, g.Name
+	HAVING COUNT(i.Id) >= 10
+	ORDER BY [ItemsCount] DESC, [ItemsPrice] DESC, u.Username
+	
+/* Problem 25. *User in Games with Their Statistics */
+
+SELECT 
+  u.Username, g.Name AS Game, MAX(c.Name) AS Character, 
+  MAX(cs.Strength) + MAX(gts.Strength) + SUM(gis.Strength) AS Strength, 
+  MAX(cs.Defence) + MAX(gts.Defence) + SUM(gis.Defence) AS Defence, 
+  MAX(cs.Speed) + MAX(gts.Speed) + SUM(gis.Speed) AS Speed, 
+  MAX(cs.Mind) + MAX(gts.Mind) + SUM(gis.Mind) AS Mind, 
+  MAX(cs.Luck) + MAX(gts.Luck) + SUM(gis.Luck) AS Luck
+FROM UsersGames AS ug
+JOIN Users AS u ON ug.UserId = u.Id
+JOIN Games AS g ON ug.GameId = g.Id
+JOIN Characters AS c ON ug.CharacterId = c.Id
+JOIN [Statistics] AS cs ON c.StatisticId = cs.Id
+JOIN GameTypes AS gt ON gt.Id = g.GameTypeId
+JOIN [Statistics] AS gts ON gts.Id = gt.BonusStatsId
+JOIN UserGameItems AS ugi ON ugi.UserGameId = ug.Id
+JOIN Items AS i ON i.Id = ugi.ItemId
+JOIN [Statistics] AS gis ON gis.Id = i.StatisticId
+GROUP BY u.Username, g.Name
+ORDER BY Strength DESC, Defence DESC, Speed DESC, Mind DESC, Luck DESC
+	
+/* Problem 26. All Items with Greater than Average Statistics */
+
+DECLARE @averageMind FLOAT = (SELECT AVG(Mind) FROM [Statistics]) 
+DECLARE @averageLuck FLOAT = (SELECT AVG(Luck) FROM [Statistics]) 
+DECLARE @averageSpeed FLOAT = (SELECT AVG(Speed) FROM [Statistics]) 
+
+SELECT i.Name, i.Price, i.MinLevel, s.Strength , s.Defence, s.Speed , s.Luck , s.Mind FROM
+(SELECT s.Id
+FROM [Statistics] AS s
+	GROUP BY s.Id
+	HAVING AVG(s.Luck) > @averageLuck AND AVG(s.Mind) > @averageMind AND AVG(s.Speed) > @averageSpeed) AS avgS
+		INNER JOIN Items AS i
+		ON i.StatisticId = avgS.Id
+		INNER JOIN [Statistics] AS s
+		on s.Id = avgS.Id
+		ORDER BY i.Name
+	
+/* Problem 27. Display All Items with Information about Forbidden Game Type */
+
+SELECT i.Name AS Item ,i.Price, i.MinLevel ,gt.Name AS [Forbidden Game Type]
+	FROM GameTypeForbiddenItems AS gbi
+	RIGHT JOIN Items AS i
+	ON gbi.ItemId = i.Id
+	LEFT JOIN GameTypes AS gt
+	ON gbi.GameTypeId = gt.Id
+	ORDER BY gt.Name DESC, i.Name
+
+/* Problem 28. Buy Items for User in Game */
+	
+SELECT Users.Id, Users.Username, UsersGames.GameId, UsersGames.Id AS UserGameId, Cash
+INTO UserInfo
+FROM Users
+INNER JOIN UsersGames ON
+UsersGames.UserId = Users.Id
+INNER JOIN Games ON
+Games.Id = UsersGames.GameId
+WHERE Username = 'Alex' AND Games.Name = 'Edinburgh'
+
+SELECT Items.Id, Name, Price
+INTO ItemsInfo
+FROM Items
+WHERE Name IN ('Blackguard', 'Bottomless Potion of Amplification', 'Eye of Etlich (Diablo III)', 'Gem of Efficacious Toxin', 'Golden Gorget of Leoric', 'Hellfire Amulet')
+
+UPDATE UsersGames
+SET Cash -= (SELECT SUM(Price) FROM ItemsInfo)
+WHERE UsersGames.Id = (SELECT UserInfo.UserGameId FROM UserInfo)
+
+INSERT INTO UserGameItems (UserGameId, ItemId)
+SELECT (SELECT UserGameId FROM UserInfo), Id FROM ItemsInfo
+
+DROP TABLE UserInfo
+DROP TABLE ItemsInfo
+
+SELECT Users.Username, Games.Name, UsersGames.Cash, Items.Name [Item Name] FROM UsersGames
+INNER JOIN Games on UsersGames.GameId = Games.Id
+INNER JOIN Users on UsersGames.UserId = Users.Id
+INNER JOIN UserGameItems on UserGameItems.UserGameId = UsersGames.Id
+INNER JOIN Items on Items.Id = UserGameItems.ItemId
+WHERE Games.Name = 'Edinburgh'
+ORDER BY Items.Name
+
+/* Problem 29. Peaks and Mountains */
+
+SELECT p.PeakName, m.MountainRange, p.Elevation
+ FROM Peaks AS p
+	INNER JOIN Mountains AS m
+	ON m.Id = p.MountainId
+	ORDER BY p.Elevation DESC, p.PeakName
+
+/* Problem 30. Peaks with Their Mountain, Country and Continent */
+
+SELECT p.PeakName, m.MountainRange, c.CountryName, ct.ContinentName
+    FROM MountainsCountries AS mc
+	INNER JOIN Mountains AS m
+	ON m.Id = mc.MountainId
+	INNER JOIN Countries AS c
+	ON c.CountryCode = mc.CountryCode
+	INNER JOIN Peaks AS p
+	ON p.MountainId = m.Id
+	INNER JOIN Continents AS ct
+	ON c.ContinentCode = ct.ContinentCode
+	ORDER BY p.PeakName, c.CountryName
+
+/* Problem 31. Rivers by Country */
+
+SELECT c.CountryName, ct.ContinentName, ISNULL(cr.RiversCount, 0) AS RiversCount, ISNULL(cr.TotalLength, 0) AS TotalLength
+	 FROM Countries AS c
+	LEFT JOIN (
+	SELECT cr.CountryCode, COUNT(cr.RiverId) AS RiversCount, SUM(r.Length) AS TotalLength
+ FROM CountriesRivers AS cr
+	INNER JOIN Rivers AS r
+	ON cr.RiverId = r.Id
+ GROUP BY cr.CountryCode) AS cr
+	ON c.CountryCode = cr.CountryCode
+	INNER JOIN Continents AS ct
+	ON ct.ContinentCode = c.ContinentCode
+	ORDER BY RiversCount DESC, TotalLength DESC, c.CountryName
+ 
+/* Problem 32. Count of Countries by Currency */
+
+SELECT c.CurrencyCode, c.Description AS Currency, cn.NumberOfCountries FROM
+(SELECT c.CurrencyCode, COUNT(ct.CountryCode) AS NumberOfCountries
+ FROM Countries AS ct
+	RIGHT JOIN Currencies AS c
+	ON ct.CurrencyCode = c.CurrencyCode
+	GROUP BY c.CurrencyCode) AS cn
+		INNER JOIN Currencies AS c
+		ON c.CurrencyCode = cn.CurrencyCode
+	ORDER BY cn.NumberOfCountries DESC, c.Description
+
+/* Problem 33. Population and Area by Continent */
+
+SELECT ct.ContinentName, SUM(c.AreaInSqKm) AS CountriesArea
+	, SUM(CAST(c.Population AS BIGINT)) AS CountriesPopulation
+	FROM Countries AS c
+	INNER JOIN Continents AS ct
+	ON c.ContinentCode = ct.ContinentCode
+	GROUP BY ct.ContinentName
+	ORDER BY CountriesPopulation DESC
+	
+/* Problem 34. Monasteries by Country */
+
+-- 01.
+CREATE TABLE Monasteries
+(
+	[Id] INT IDENTITY PRIMARY KEY,
+	[Name] VARCHAR(50),
+	[CountryCode] CHAR(2),
+	CONSTRAINT FK_Monasteries_Countries FOREIGN KEY([CountryCode])
+	REFERENCES Countries([CountryCode])
+)
+-- 02.
+INSERT INTO Monasteries(Name, CountryCode) VALUES
+('Rila Monastery St. Ivan of Rila', 'BG'), 
+('Bachkovo Monastery Virgin Mary', 'BG'),
+('Troyan Monastery Holy Mother''s Assumption', 'BG'),
+('Kopan Monastery', 'NP'),
+('Thrangu Tashi Yangtse Monastery', 'NP'),
+('Shechen Tennyi Dargyeling Monastery', 'NP'),
+('Benchen Monastery', 'NP'),
+('Southern Shaolin Monastery', 'CN'),
+('Dabei Monastery', 'CN'),
+('Wa Sau Toi', 'CN'),
+('Lhunshigyia Monastery', 'CN'),
+('Rakya Monastery', 'CN'),
+('Monasteries of Meteora', 'GR'),
+('The Holy Monastery of Stavronikita', 'GR'),
+('Taung Kalat Monastery', 'MM'),
+('Pa-Auk Forest Monastery', 'MM'),
+('Taktsang Palphug Monastery', 'BT'),
+('Sumela Monastery', 'TR')
+-- 03.
+ALTER TABLE Countries
+ADD IsDeleted BIT NOT NULL DEFAULT(0)
+-- 04.
+UPDATE Countries
+SET IsDeleted = 1
+WHERE CountryCode IN
+(SELECT cr.CountryCode
+FROM CountriesRivers AS cr
+GROUP BY cr.CountryCode
+HAVING COUNT(cr.RiverId) > 3)
+-- 05.
+SELECT m.Name AS Monastery, c.CountryName AS Country
+	 FROM Monasteries AS m
+	INNER JOIN Countries AS c
+	ON c.CountryCode = m.CountryCode
+	WHERE c.IsDeleted = 0
+	ORDER BY Monastery
+
+/* Problem 35. Monasteries by Continents and Countries */
+
+-- 01.
+UPDATE Countries
+SET CountryName = 'Burma'
+WHERE CountryName = 'Myanmar'
+-- 02 & 03.
+INSERT INTO Monasteries (Name, CountryCode) VALUES
+('Hanga Abbey', (SELECT CountryCode FROM Countries WHERE CountryName = 'Tanzania')),
+('Myin-Tin-Daik', (SELECT CountryCode FROM Countries WHERE CountryName = 'Myanmar'))
+-- 04.
+SELECT c.ContinentName, ct.CountryName, COUNT(m.Id) AS MonasteriesCount
+FROM Continents AS c
+	LEFT JOIN Countries AS ct
+	ON c.ContinentCode = ct.ContinentCode
+	LEFT JOIN Monasteries AS m
+	ON ct.CountryCode = m.CountryCode
+	WHERE ct.IsDeleted = 0
+    GROUP BY c.ContinentName, ct.CountryName
+	ORDER BY MonasteriesCount DESC, ct.CountryName
+	

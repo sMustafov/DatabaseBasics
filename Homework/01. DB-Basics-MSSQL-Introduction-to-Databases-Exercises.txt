@@ -1,0 +1,96 @@
+1. Exercises - Introduction to Databases
+
+SELECT * FROM [dbo].[Minions]
+
+/* Problem 6. Select Data from Table */
+
+SELECT Name 
+FROM [dbo].[Minions]
+ORDER BY Name ASC
+
+/* Problem 7. Update One Record */
+
+UPDATE [dbo].[Minions]
+SET Age=10
+WHERE Name='Stuart'
+
+/* Problem 8. Update All Records */
+
+UPDATE [dbo].[Minions]
+SET Age += 1
+
+/* Problem 9. Delete Record */
+
+DELETE FROM [dbo].[Minions]
+WHERE Name='Bob'
+
+/* Problem 10. Create New Table */
+
+CREATE TABLE Towns
+(
+	Id int,
+	Name nvarchar(255),
+	PRIMARY KEY (Id)
+)
+
+/* Problem 10. Create New Table */
+
+SELECT 
+	m.Id,
+	m.Name, 
+	t.Name AS Town
+FROM Minions m
+LEFT JOIN Towns t ON t.Id = m.TownId
+
+
+/* Problem 11. Create New Database */
+
+CREATE DATABASE School
+GO
+
+USE School
+GO
+
+CREATE TABLE Students
+(
+	Id int NOT NULL, 
+	Name nvarchar(50) NOT NULL, 
+	Age int, 
+	PhoneNumber int,
+	CONSTRAINT PK_Students PRIMARY KEY(Id)
+)
+
+CREATE TABLE Classes
+(
+	Id int NOT NULL, 
+	Name nvarchar(50) NOT NULL, 
+	MaxStudents int,
+	CONSTRAINT PK_Classes PRIMARY KEY(Id)
+)
+
+CREATE TABLE Teachers
+(
+	Id int NOT NULL, 
+	Name nvarchar(50) NOT NULL, 
+	Class nvarchar(50),
+	CONSTRAINT PK_Teachers PRIMARY KEY(Id)
+)
+
+INSERT Students (Id, Name, Age, PhoneNumber) VALUES (1, 'Pesho Peshov', 20, 123456789)
+INSERT Students (Id, Name, Age, PhoneNumber) VALUES (2, 'Gosho Goshov', 25, 987654321)
+INSERT Students (Id, Name, Age, PhoneNumber) VALUES (3, 'Minka Minkova', 30, 111111111)
+
+INSERT Classes (Id, Name, MaxStudents) VALUES (1, 'C# DB Fundamentals', 100)
+INSERT Classes (Id, Name, MaxStudents) VALUES (2, 'Java Fundamentals', 200)
+INSERT Classes (Id, Name, MaxStudents) VALUES (3, 'Web Basics', 300)
+
+INSERT Teachers (Id, Name, Class) VALUES (1, 'Nakov', 'C# DB Fundamentals')
+INSERT Teachers (Id, Name, Class) VALUES (2, 'Royal', 'Java Fundamentals')
+INSERT Teachers (Id, Name, Class) VALUES (3, 'Trifon', 'Web Basics')
+
+DELETE FROM Classes
+WHERE Id=3
+
+UPDATE Teachers
+SET Name = 'Svetlio'
+WHERE Id=1
